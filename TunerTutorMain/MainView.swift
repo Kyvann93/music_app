@@ -17,6 +17,12 @@ struct MainView: View {
                 .tabItem {
                     Label("Suggestions", systemImage: "music.note.list")
                 }
+
+            SongRecognitionView()
+                // .environmentObject(musicService) // If needed later for API calls
+                .tabItem {
+                    Label("Recognize", systemImage: "shazam.logo.fill")
+                }
             
             ProfileView()
                 .environmentObject(appState)
