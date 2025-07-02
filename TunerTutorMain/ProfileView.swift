@@ -8,85 +8,66 @@ struct ProfileView: View {
         NavigationView {
             Form {
                 // User Information
-                Section(header: Text("Personal Information")) {
-                    if let user = appState.currentUser {
+                Section(header: Text("Profile Information")) {
+                    if let profile = appState.activeLocalProfile {
                         HStack {
-                            Text("Username")
+                            Text("Profile Name")
                             Spacer()
-                            Text(user.username)
+                            Text(profile.name)
                                 .foregroundColor(.gray)
                         }
-                        
                         HStack {
-                            Text("Email")
+                            Text("Profile ID") // For debug or info
                             Spacer()
-                            Text(user.email)
+                            Text(profile.id.prefix(8) + "...") // Show partial ID
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        HStack {
+                            Text("Profile Created")
+                            Spacer()
+                            Text(profile.creationDate, style: .date)
                                 .foregroundColor(.gray)
                         }
                     } else {
-                        Text("User information not available")
+                        Text("No active profile.")
                             .foregroundColor(.red)
                     }
                 }
-                
-                // Skill Level
-                Section(header: Text("Skill Level")) {
-                    HStack {
-                        Text("Current Level")
-                        Spacer()
-                        Text(appState.currentUser?.skillLevel ?? "Intermediate")
-                            .foregroundColor(.gray)
-                    }
+
+                // My Content Section
+                Section(header: Text("My Content")) {
+                    NavigationLink("Saved Tabs", destination: SavedTabsView().environmentObject(appState))
+                    // We can add a link to Recognition History here too if desired,
+                    // though it's also a main tab.
+                    // NavigationLink("Recognition History", destination: HistoryView().environmentObject(appState))
                 }
                 
-                // Preferred Genres
-                Section(header: Text("Preferred Genres")) {
-                    ForEach(appState.currentUser?.preferredGenres ?? ["Rock", "Blues", "Jazz"], id: \.self) { genre in
-                        Text(genre)
-                    }
+                // Preferences Section (placeholder for now)
+                Section(header: Text("Preferences")) {
+                    Text("User preferences will go here.")
+                        .foregroundColor(.gray)
+                    // Example:
+                    // NavigationLink("Edit Preferences", destination: PreferencesEditView())
                 }
                 
-                // Practice Statistics
-                Section(header: Text("Practice Statistics")) {
-                    HStack {
-                        Text("Songs Practiced")
-                        Spacer()
-                        Text("42")
-                            .foregroundColor(.gray)
-                    }
-                    
-                    HStack {
-                        Text("Total Practice Time")
-                        Spacer()
-                        Text("24 hours")
-                            .foregroundColor(.gray)
-                    }
-                    
-                    HStack {
-                        Text("Longest Streak")
-                        Spacer()
-                        Text("7 days")
-                            .foregroundColor(.gray)
-                    }
-                }
-                
-                // Account
-                Section(header: Text("Account")) {
+                // Account Actions
+                Section(header: Text("Account Actions")) {
                     Button(action: {
                         showingLogoutAlert = true
                     }) {
-                        Text("Log Out")
+                        Text("Clear Active Profile") // Changed label
                             .foregroundColor(.red)
                     }
                 }
             }
-            .navigationTitle("Your Profile")
+            .navigationTitle(appState.activeLocalProfile?.name ?? "Profile")
             .alert(isPresented: $showingLogoutAlert) {
                 Alert(
-                    title: Text("Log Out"),
-                    message: Text("Are you sure you want to log out?"),
-                    primaryButton: .destructive(Text("Log Out")) {
-                        appState.logout()
+                    title: Text("Clear Profile"),
+                    message: Text("Are you sure you want to clear the active profile? This will require you to create a new profile on next app start if no other profiles exist."),
+                    primaryButton: .destructive(Text("Clear Profile")) {
+                        appState.clearActiveProfile() // Use the new method
                     },
                     secondaryButton: .cancel()
                 )
@@ -95,7 +76,12 @@ struct ProfileView: View {
     }
 }
 
-#Preview {
-    ProfileView()
-        .environmentObject(AppState())
+struct ProfileView_Previews: PreviewProvider { // Renamed for consistency
+    static var previews: some View {
+        let appState = AppState()
+        // Simulate an active profile for preview
+        // appState.setActiveProfile(UserProfileRecord(id: "previewUser", name: "Preview User"))
+        ProfileView()
+            .environmentObject(appState)
+    }
 }

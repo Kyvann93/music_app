@@ -11,10 +11,16 @@ struct ContentView: View {
     @EnvironmentObject private var musicService: MusicService
     
     var body: some View {
-        if appState.isLoggedIn {
+        // Use isLocalProfileActive from our updated AppState
+        if appState.isLocalProfileActive {
             MainView()
+                .environmentObject(appState) // Ensure appState is passed if MainView needs it directly
+                .environmentObject(musicService) // Pass other necessary environment objects
+            // authService might not be needed here if we are fully on local profiles
         } else {
-            LoginView()
+            // Show CreateProfileView if no local profile is active
+            CreateProfileView()
+                .environmentObject(appState)
         }
     }
 }

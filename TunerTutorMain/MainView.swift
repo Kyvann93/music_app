@@ -18,8 +18,10 @@ struct MainView: View {
                     Label("Suggestions", systemImage: "music.note.list")
                 }
 
-            SongRecognitionView()
-                // .environmentObject(musicService) // If needed later for API calls
+            // Create the ViewModel here, injecting appState, and pass it to SongRecognitionView
+            SongRecognitionView(viewModel: SongRecognitionViewModel(appState: appState))
+                .environmentObject(appState) // Pass appState for view's own environment if direct access is needed
+                // .environmentObject(musicService) // Pass musicService if needed by SongRecognitionView or its VM
                 .tabItem {
                     Label("Recognize", systemImage: "shazam.logo.fill")
                 }

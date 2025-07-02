@@ -13,6 +13,15 @@ class SongRecognitionViewModel: ObservableObject {
     @Published var pianoTabURL: URL?
     @Published var showMicPermissionAlert = false // For microphone permission alert
 
+    @Published var guitarTabSaved: Bool = false
+    @Published var pianoTabSaved: Bool = false
+    @Published var tabSavingError: String? = nil
+    @Published var historySavingError: String? = nil
+
+
+    // AppState will be injected via init
+    private var appState: AppState
+
     private var shazamService = ShazamRecognitionService()
     private var funFactTimer: Timer?
 
@@ -25,8 +34,13 @@ class SongRecognitionViewModel: ObservableObject {
         "A 'jiffy' is an actual unit of time: 1/100th of a second."
     ]
 
-    init() {
-        shazamService.delegate = self
+    init(appState: AppState) {
+        self.appState = appState
+        // shazamService must be initialized before its delegate is set.
+        // If shazamService itself doesn't depend on appState for its own init, this is fine.
+        // If it did, appState would need to be passed to shazamService's init too.
+        self.shazamService = ShazamRecognitionService() // Ensure it's initialized
+        self.shazamService.delegate = self
     }
 
     func toggleSearch() {
@@ -83,6 +97,10 @@ extension SongRecognitionViewModel: ShazamRecognitionServiceDelegate {
             self.artworkURL = nil // Reset artwork URL
             self.guitarTabURL = nil
             self.pianoTabURL = nil
+            self.guitarTabSaved = false // Reset saved status
+            self.pianoTabSaved = false  // Reset saved status
+            self.tabSavingError = nil   // Clear any previous errors
+            self.historySavingError = nil // Clear history error
         }
     }
 
@@ -97,30 +115,131 @@ extension SongRecognitionViewModel: ShazamRecognitionServiceDelegate {
             self.artworkURL = mediaItem.artworkURL // Store artwork URL
             self.funFactText = "Song Found!" // Or display song title directly
             self.displayResults = true
+            self.guitarTabSaved = false // Reset for new song
+            self.pianoTabSaved = false
+            self.tabSavingError = nil
+            self.historySavingError = nil // Reset history error for new match
 
             // Construct search URLs for tabs
             self.constructTabSearchURLs(title: mediaItem.title, artist: mediaItem.artist)
+            // After constructing URLs, check if they are already saved
+            self.checkIfTabsAreSaved()
+
+
+            // Save to history
+            if let profileId = self.appState.activeLocalProfile?.id {
+                let historyRecord = RecognitionHistoryRecord(
+                    userProfileId: profileId,
+                    songTitle: mediaItem.title ?? "Unknown Title",
+                    artist: mediaItem.artist,
+                    artworkURL: mediaItem.artworkURL?.absoluteString,
+                    shazamTrackId: mediaItem.shazamID // Assuming shazamID is available on SHMatchedMediaItem
+                    // If shazamID is not directly available, one might need to check specific properties or use another identifier
+                )
+                do {
+                    _ = try LocalDatabaseService.shared.saveRecognitionHistory(historyRecord)
+                    self.historySavingError = nil // Clear error on success
+                    print("Successfully saved to recognition history.")
+                } catch {
+                    print("Failed to save recognition history: \(error.localizedDescription)")
+                    self.historySavingError = "Couldn't save to history. Please try again later."
+                }
+            } else {
+                print("No active local profile ID found, cannot save to history.")
+                self.historySavingError = "No active profile to save history." // Should ideally not happen if user is in this view
+            }
         }
     }
 
     private func constructTabSearchURLs(title: String?, artist: String?) {
         guard let title = title, let artist = artist else { return }
-
         let query = "\(title) \(artist)"
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
-
-        // Ultimate Guitar search URL structure
         if let guitarURL = URL(string: "https://www.ultimate-guitar.com/search.php?search_type=title&value=\(encodedQuery)") {
             self.guitarTabURL = guitarURL
         }
-
-        // For piano, we can use a similar query. Many sites might show piano versions or chords.
-        // You might want to refine this if you find a better piano-specific search or site.
-        // Example: searching for "chords" might be more relevant for piano sometimes.
         if let pianoURL = URL(string: "https://www.ultimate-guitar.com/search.php?search_type=title&value=\(encodedQuery)%20piano") {
             self.pianoTabURL = pianoURL
         }
     }
+
+    func checkIfTabsAreSaved() {
+        guard let profileId = appState.activeLocalProfile?.id else { return }
+        self.tabSavingError = nil
+
+        if let url = guitarTabURL {
+            do {
+                if let _ = try LocalDatabaseService.shared.getSavedTab(forUserProfileId: profileId, tabURL: url.absoluteString) {
+                    self.guitarTabSaved = true
+                } else {
+                    self.guitarTabSaved = false
+                }
+            } catch {
+                print("Error checking saved guitar tab: \(error.localizedDescription)")
+                // Don't necessarily set guitarTabSaved to false, as it might be a temp DB error
+            }
+        }
+        if let url = pianoTabURL {
+            do {
+                if let _ = try LocalDatabaseService.shared.getSavedTab(forUserProfileId: profileId, tabURL: url.absoluteString) {
+                    self.pianoTabSaved = true
+                } else {
+                    self.pianoTabSaved = false
+                }
+            } catch {
+                print("Error checking saved piano tab: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func saveGuitarTab() {
+        guard let profileId = appState.activeLocalProfile?.id,
+              let url = guitarTabURL,
+              let title = identifiedSongTitle else {
+            self.tabSavingError = "Missing information to save guitar tab."
+            return
+        }
+        self.tabSavingError = nil
+
+        let savedTab = SavedTabRecord(userProfileId: profileId,
+                                      songTitle: title,
+                                      artist: identifiedSongArtist,
+                                      tabURL: url.absoluteString,
+                                      tabType: "guitar")
+        do {
+            _ = try LocalDatabaseService.shared.saveSavedTab(savedTab)
+            self.guitarTabSaved = true
+        } catch {
+            print("Error saving guitar tab: \(error.localizedDescription)")
+            self.tabSavingError = "Failed to save guitar tab."
+            self.guitarTabSaved = false // Ensure it's marked as not saved if error occurs
+        }
+    }
+
+    func savePianoTab() {
+        guard let profileId = appState.activeLocalProfile?.id,
+              let url = pianoTabURL,
+              let title = identifiedSongTitle else {
+            self.tabSavingError = "Missing information to save piano tab."
+            return
+        }
+        self.tabSavingError = nil
+
+        let savedTab = SavedTabRecord(userProfileId: profileId,
+                                      songTitle: title,
+                                      artist: identifiedSongArtist,
+                                      tabURL: url.absoluteString,
+                                      tabType: "piano")
+        do {
+            _ = try LocalDatabaseService.shared.saveSavedTab(savedTab)
+            self.pianoTabSaved = true
+        } catch {
+            print("Error saving piano tab: \(error.localizedDescription)")
+            self.tabSavingError = "Failed to save piano tab."
+            self.pianoTabSaved = false // Ensure it's marked as not saved if error occurs
+        }
+    }
+
     func didNotFindMatch(error: Error?) {
         DispatchQueue.main.async {
             self.isSearching = false
@@ -154,7 +273,12 @@ extension SongRecognitionViewModel: ShazamRecognitionServiceDelegate {
 
 
 struct SongRecognitionView: View {
-    @StateObject private var viewModel = SongRecognitionViewModel()
+    // ViewModel is now passed in, owned by the parent (MainView) via @StateObject
+    @ObservedObject var viewModel: SongRecognitionViewModel
+    // We still need AppState here if the View itself needs to react to it,
+    // or for the preview. If only the VM needs it, this could be removed.
+    // For the .alert, it's cleaner if the viewModel handles the showMicPermissionAlert state.
+    // The viewModel already has @Published showMicPermissionAlert.
 
     var body: some View {
         ZStack {
@@ -237,33 +361,59 @@ struct SongRecognitionView: View {
                             .multilineTextAlignment(.center)
 
                         // Buttons for finding tabs
-                        if viewModel.guitarTabURL != nil || viewModel.pianoTabURL != nil {
-                            HStack(spacing: 15) {
-                                if let url = viewModel.guitarTabURL {
+                        VStack(spacing: 8) { // Use VStack for multiple rows of buttons
+                            if let url = viewModel.guitarTabURL {
+                                HStack {
                                     Link(destination: url) {
                                         Text("Guitar Tabs")
                                             .font(.caption.weight(.semibold))
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
+                                            .frame(maxWidth: .infinity)
                                             .background(Color.blue.opacity(0.7))
                                             .foregroundColor(.white)
                                             .cornerRadius(10)
                                     }
+                                    Button(action: { viewModel.saveGuitarTab() }) {
+                                        Image(systemName: viewModel.guitarTabSaved ? "bookmark.fill" : "bookmark")
+                                            .foregroundColor(viewModel.guitarTabSaved ? .yellow : .white)
+                                    }
+                                    .padding(.leading, 5)
                                 }
-                                if let url = viewModel.pianoTabURL {
+                            }
+                            if let url = viewModel.pianoTabURL {
+                                HStack {
                                     Link(destination: url) {
                                         Text("Piano Tabs")
                                             .font(.caption.weight(.semibold))
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
+                                            .frame(maxWidth: .infinity)
                                             .background(Color.green.opacity(0.7))
                                             .foregroundColor(.white)
                                             .cornerRadius(10)
                                     }
+                                    Button(action: { viewModel.savePianoTab() }) {
+                                        Image(systemName: viewModel.pianoTabSaved ? "bookmark.fill" : "bookmark")
+                                            .foregroundColor(viewModel.pianoTabSaved ? .yellow : .white)
+                                    }
+                                    .padding(.leading, 5)
                                 }
                             }
-                            .padding(.top, 10)
+                            if let tabError = viewModel.tabSavingError {
+                                Text(tabError)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                    .padding(.top, 5)
+                            }
+                            if let historyError = viewModel.historySavingError {
+                                Text(historyError)
+                                    .font(.caption)
+                                    .foregroundColor(.orange) // Different color to distinguish
+                                    .padding(.top, 5)
+                            }
                         }
+                        .padding(.top, 10)
                     }
                     .padding(EdgeInsets(top: 20, leading: 20, bottom: 20, trailing: 20))
                     .frame(maxWidth: .infinity)
@@ -313,6 +463,13 @@ struct SongRecognitionView: View {
 
 struct SongRecognitionView_Previews: PreviewProvider {
     static var previews: some View {
-        SongRecognitionView()
+        // For the preview to work, we need to provide a mock AppState
+        // and initialize SongRecognitionViewModel with it.
+        let mockAppState = AppState()
+        // You might want to set a mock active profile in mockAppState for different preview scenarios
+        // e.g., mockAppState.setActiveProfile(UserProfileRecord(name: "Preview User"))
+
+        SongRecognitionView(viewModel: SongRecognitionViewModel(appState: mockAppState))
+            .environmentObject(mockAppState) // Also provide it to the view's environment if needed by subviews directly
     }
 }
